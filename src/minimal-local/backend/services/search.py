@@ -43,6 +43,7 @@ class SearchService:
         query: Optional[str] = None,
         threat_type: Optional[str] = None,
         testability: Optional[str] = None,
+        target_system: Optional[str] = None,
         severity_min: Optional[int] = None,
         severity_max: Optional[int] = None,
         date_from: Optional[datetime] = None,
@@ -57,6 +58,7 @@ class SearchService:
             query: Search query string (searches title and description)
             threat_type: Filter by threat type (e.g., 'adversarial', 'extraction')
             testability: Filter by testability (yes, no, conditional)
+            target_system: Filter by target system (llm, vision, multimodal, rag, agentic, chat)
             severity_min: Minimum severity level (1-10)
             severity_max: Maximum severity level (1-10)
             date_from: Filter threats published after this date
@@ -75,7 +77,7 @@ class SearchService:
         Requirements: 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8
         """
         logger.info(f"Search request: query='{query}', type={threat_type}, testability={testability}, "
-                   f"severity={severity_min}-{severity_max}, page={page}")
+                   f"target_system={target_system}, severity={severity_min}-{severity_max}, page={page}")
         
         # Build base query
         stmt = select(Threat)
@@ -141,12 +143,13 @@ class SearchService:
         if date_to:
             filters.append(Threat.published_at <= date_to)
         
-        # Apply metadata filters (testability)
-        if testability:
+        # Apply metadata filters (testability, target_system)
+        if testability or target_system:
             from utils.query_builders import build_metadata_filter
             metadata_filters = build_metadata_filter(
                 Threat,
-                testability=testability
+                testability=testability,
+                target_systems=[target_system] if target_system else None
             )
             if metadata_filters:
                 filters.extend(metadata_filters)
@@ -274,6 +277,29 @@ class SearchService:
         )
         result = await self.db.execute(stmt)
         return [row[0] for row in result.all()]
+
+
+    async def get_target_systems(self) -> List[str]:
+        """
+        Get list of all unique target systems from classification metadata.
+
+        Extracts distinct values from the classification_metadata JSON field:
+        classification_metadata -> threat_metadata -> target_systems (array)
+
+        Returns:
+            Sorted list of unique target system strings
+        """
+        stmt = text("""
+            SELECT DISTINCT jsonb_array_elements_text(
+                (classification_metadata->'threat_metadata'->'target_systems')::jsonb
+            ) AS target_system
+            FROM threats
+            WHERE classification_metadata->'threat_metadata'->'target_systems' IS NOT NULL
+            ORDER BY target_system
+        """)
+        result = await self.db.execute(stmt)
+        return [row[0] for row in result.all()]
+
     
     async def get_search_statistics(self) -> Dict[str, Any]:
         """

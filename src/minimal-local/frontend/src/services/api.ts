@@ -89,6 +89,7 @@ export const searchApi = {
     q?: string
     threat_type?: string
     testability?: string
+    target_system?: string
     severity_min?: number
     severity_max?: number
     date_from?: string
@@ -105,6 +106,10 @@ export const searchApi = {
   },
   threatTypes: async () => {
     const response = await api.get('/api/v1/search/threat-types')
+    return response.data
+  },
+  targetSystems: async () => {
+    const response = await api.get('/api/v1/search/target-systems')
     return response.data
   },
   recent: async (limit = 10) => {

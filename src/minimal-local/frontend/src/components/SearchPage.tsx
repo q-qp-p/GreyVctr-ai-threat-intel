@@ -12,6 +12,7 @@ export default function SearchPage() {
   // Filter states
   const [threatType, setThreatType] = useState<string>('')
   const [testability, setTestability] = useState<string>('')
+  const [targetSystem, setTargetSystem] = useState<string>('')
   const [severityMin, setSeverityMin] = useState<number | undefined>()
   const [severityMax, setSeverityMax] = useState<number | undefined>()
   const [dateFrom, setDateFrom] = useState<string>('')
@@ -26,6 +27,12 @@ export default function SearchPage() {
   const { data: threatTypesData } = useQuery({
     queryKey: ['threatTypes'],
     queryFn: () => searchApi.threatTypes(),
+  })
+
+  // Fetch target systems for dropdown
+  const { data: targetSystemsData } = useQuery({
+    queryKey: ['targetSystems'],
+    queryFn: () => searchApi.targetSystems(),
   })
 
   const { data, isLoading } = useQuery({
@@ -54,6 +61,7 @@ export default function SearchPage() {
     const filters: any = {}
     if (threatType) filters.threat_type = threatType
     if (testability) filters.testability = testability
+    if (targetSystem) filters.target_system = targetSystem
     if (severityMin !== undefined) filters.severity_min = severityMin
     if (severityMax !== undefined) filters.severity_max = severityMax
     if (dateFrom) filters.date_from = dateFrom
@@ -65,6 +73,7 @@ export default function SearchPage() {
   const clearFilters = () => {
     setThreatType('')
     setTestability('')
+    setTargetSystem('')
     setSeverityMin(undefined)
     setSeverityMax(undefined)
     setDateFrom('')
@@ -182,6 +191,25 @@ export default function SearchPage() {
                   <option value="yes">Yes (Runtime Testable)</option>
                   <option value="no">No (Not Testable)</option>
                   <option value="conditional">Conditional</option>
+                </select>
+              </div>
+
+              {/* Target System Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Target System
+                </label>
+                <select
+                  value={targetSystem}
+                  onChange={(e) => setTargetSystem(e.target.value)}
+                  className="block w-full pl-3 pr-10 py-2 text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 rounded-md"
+                >
+                  <option value="">All Systems</option>
+                  {targetSystemsData?.target_systems?.map((sys: string) => (
+                    <option key={sys} value={sys}>
+                      {sys.toUpperCase()}
+                    </option>
+                  ))}
                 </select>
               </div>
 

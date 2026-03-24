@@ -24,6 +24,7 @@ async def search_threats(
     q: Optional[str] = Query(None, description="Search query (searches title and description)"),
     threat_type: Optional[str] = Query(None, description="Filter by threat type"),
     testability: Optional[str] = Query(None, description="Filter by testability (yes, no, conditional)"),
+    target_system: Optional[str] = Query(None, description="Filter by target system (llm, vision, multimodal, rag, agentic, chat)"),
     severity_min: Optional[int] = Query(None, ge=1, le=10, description="Minimum severity (1-10)"),
     severity_max: Optional[int] = Query(None, ge=1, le=10, description="Maximum severity (1-10)"),
     date_from: Optional[datetime] = Query(None, description="Filter threats published after this date (ISO 8601)"),
@@ -93,6 +94,7 @@ async def search_threats(
             query=q,
             threat_type=threat_type,
             testability=testability,
+            target_system=target_system,
             severity_min=severity_min,
             severity_max=severity_max,
             date_from=date_from,
@@ -177,6 +179,37 @@ async def get_threat_types(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to retrieve threat types: {str(e)}"
+        )
+
+
+@router.get("/search/target-systems")
+async def get_target_systems(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get list of all unique target systems from classification metadata.
+    
+    Returns:
+    - List of target system strings (e.g., llm, vision, rag, agentic, chat)
+    
+    Useful for populating target system filter dropdowns.
+    """
+    try:
+        search_service = await get_search_service(db)
+        target_systems = await search_service.get_target_systems()
+        
+        logger.info(f"Retrieved {len(target_systems)} target systems")
+        
+        return {
+            "target_systems": target_systems,
+            "count": len(target_systems)
+        }
+    
+    except Exception as e:
+        logger.error(f"Target systems error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve target systems: {str(e)}"
         )
 
 
