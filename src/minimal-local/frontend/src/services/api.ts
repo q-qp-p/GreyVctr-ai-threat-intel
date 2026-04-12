@@ -177,6 +177,14 @@ export const systemApi = {
     const response = await api.post('/api/v1/system/collect-now')
     return response.data
   },
+  pauseProcessing: async () => {
+    const response = await api.post('/api/v1/system/pause-processing')
+    return response.data
+  },
+  resumeProcessing: async () => {
+    const response = await api.post('/api/v1/system/resume-processing')
+    return response.data
+  },
 }
 
 export default api

@@ -236,6 +236,8 @@ The API uses a hybrid authentication model:
   - `GET /api/v1/system/llm-analysis-stats` - LLM analysis statistics (Public - Read-only)
   - `POST /api/v1/system/retry-failed-llm` - Retry failed LLM analysis (**Admin only** - Write operation)
   - `POST /api/v1/system/recover-pending-llm` - Re-queue orphaned pending LLM analyses (**Admin only** - Write operation)
+  - `POST /api/v1/system/pause-processing` - Pause enrichment and LLM analysis (**Admin only** - Write operation)
+  - `POST /api/v1/system/resume-processing` - Resume processing and re-queue pending threats (**Admin only** - Write operation)
   - `GET /api/v1/system/ollama-config` - Ollama configuration (Public - Read-only)
   - `GET /api/v1/system/threat-type-info` - Threat type information (Public - Read-only)
 
@@ -378,6 +380,104 @@ docker compose -f docker-compose.minimal.yml exec postgres psql -U ai_shield
 
 # Access Redis CLI
 docker compose -f docker-compose.minimal.yml exec redis redis-cli
+```
+
+## Pause/Resume Processing
+
+The system supports pausing GPU-intensive background processing (enrichment and LLM analysis) while allowing lightweight RSS collection to continue. This is useful when you need to free up GPU/CPU resources for other tasks, save battery on a MacBook, or present the dashboard without background processing noise.
+
+### Using from the Dashboard
+
+1. Open the Dashboard at http://localhost:3000
+2. Find the "Pause Processing" button next to "Collect Now" in the System Activity section
+3. Click "Pause Processing" to halt enrichment and LLM analysis
+4. A banner appears showing that processing is paused and when it was paused
+5. Click "Resume Processing" to restart — any threats that were skipped while paused are automatically re-queued
+
+The Dashboard polls system status every 10 seconds, so the pause/resume state stays in sync across browser tabs.
+
+### Behavior While Paused
+
+- **Skipped**: Enrichment (classification, entity extraction, MITRE mapping) and LLM analysis tasks check the pause state when they start executing. If paused, they return immediately without doing work.
+- **Continues**: RSS collection and threat ingestion are unaffected. New threats are still fetched, ingested, and their enrichment tasks are queued — but those tasks will skip processing until you resume.
+- **Persistent**: Pause state is stored in Redis, so it survives API and worker restarts.
+
+### Resume Behavior
+
+When you click "Resume Processing", the system:
+1. Clears the pause state in Redis
+2. Re-queues all threats with `pending` enrichment status for enrichment
+3. Re-queues all threats with `pending` LLM analysis status (and completed enrichment) for LLM analysis
+4. Returns the count of re-queued threats in the API response
+
+### API Endpoints
+
+Both endpoints require admin authentication (same as "Collect Now").
+
+**Pause Processing**
+
+```
+POST /api/v1/system/pause-processing
+Authorization: Bearer <admin-token>
+```
+
+Response:
+```json
+{
+  "status": "success",
+  "message": "Processing paused successfully",
+  "paused_at": "2025-01-15T10:30:00Z"
+}
+```
+
+Returns `"status": "already_paused"` if processing is already paused.
+
+**Resume Processing**
+
+```
+POST /api/v1/system/resume-processing
+Authorization: Bearer <admin-token>
+```
+
+Response:
+```json
+{
+  "status": "success",
+  "message": "Processing resumed successfully",
+  "requeued_enrichment": 5,
+  "requeued_llm": 3
+}
+```
+
+Returns `"status": "already_active"` if processing is not paused.
+
+**Processing Status**
+
+The existing `GET /api/v1/system/status` response includes a `processing` field:
+
+```json
+{
+  "processing": {
+    "paused": true,
+    "paused_at": "2025-01-15T10:30:00Z",
+    "paused_by": "admin"
+  }
+}
+```
+
+### Using via curl
+
+```bash
+# Pause processing
+curl -X POST http://localhost:8000/api/v1/system/pause-processing \
+  -H "Authorization: Bearer YOUR_TOKEN_HERE"
+
+# Resume processing
+curl -X POST http://localhost:8000/api/v1/system/resume-processing \
+  -H "Authorization: Bearer YOUR_TOKEN_HERE"
+
+# Check current state
+curl http://localhost:8000/api/v1/system/status | jq '.processing'
 ```
 
 ## Configuration

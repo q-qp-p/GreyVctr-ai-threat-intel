@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, TrendingUp, Database, Activity, Clock, Zap, BarChart3, RefreshCw, AlertCircle, CheckCircle, XCircle, HelpCircle } from 'lucide-react'
+import { AlertTriangle, TrendingUp, Database, Activity, Clock, Zap, BarChart3, RefreshCw, AlertCircle, CheckCircle, XCircle, HelpCircle, Pause, Play } from 'lucide-react'
 import { searchApi, healthApi, systemApi } from '../services/api'
 import { useState } from 'react'
 import Toast, { ToastType } from './Toast'
@@ -81,6 +81,30 @@ export default function Dashboard() {
       } else {
         setToast({ message: `Failed to start collection: ${message}`, type: 'error' })
       }
+    },
+  })
+
+  const pauseProcessingMutation = useMutation({
+    mutationFn: () => systemApi.pauseProcessing(),
+    onSuccess: () => {
+      setToast({ message: 'Processing paused successfully', type: 'success' })
+      queryClient.invalidateQueries({ queryKey: ['system-status'] })
+    },
+    onError: (error: any) => {
+      const message = error.response?.data?.message || error.message
+      setToast({ message: `Failed to pause processing: ${message}`, type: 'error' })
+    },
+  })
+
+  const resumeProcessingMutation = useMutation({
+    mutationFn: () => systemApi.resumeProcessing(),
+    onSuccess: () => {
+      setToast({ message: 'Processing resumed successfully', type: 'success' })
+      queryClient.invalidateQueries({ queryKey: ['system-status'] })
+    },
+    onError: (error: any) => {
+      const message = error.response?.data?.message || error.message
+      setToast({ message: `Failed to resume processing: ${message}`, type: 'error' })
     },
   })
 
@@ -213,6 +237,24 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Paused Processing Banner */}
+      {systemStatus?.processing?.paused && (
+        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-lg p-4">
+          <div className="flex items-center">
+            <Pause className="h-5 w-5 text-amber-600 dark:text-amber-400 mr-3" />
+            <div>
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                Processing Paused
+              </p>
+              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                Paused at: {formatDateTime(systemStatus.processing.paused_at)}
+                {systemStatus.processing.paused_by && ` by ${systemStatus.processing.paused_by}`}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Enhanced System Status */}
       {systemStatus && (
         <div className="bg-white dark:bg-gray-800 shadow rounded-lg">
@@ -252,6 +294,44 @@ export default function Dashboard() {
                   </>
                 )}
               </button>
+              {/* Pause/Resume Processing Button */}
+              {systemStatus.processing?.paused ? (
+                <button
+                  onClick={() => resumeProcessingMutation.mutate()}
+                  disabled={resumeProcessingMutation.isPending}
+                  className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                >
+                  {resumeProcessingMutation.isPending ? (
+                    <>
+                      <RefreshCw className="animate-spin h-4 w-4 mr-2" />
+                      Resuming...
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-4 w-4 mr-2" />
+                      Resume Processing
+                    </>
+                  )}
+                </button>
+              ) : (
+                <button
+                  onClick={() => pauseProcessingMutation.mutate()}
+                  disabled={pauseProcessingMutation.isPending}
+                  className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500"
+                >
+                  {pauseProcessingMutation.isPending ? (
+                    <>
+                      <RefreshCw className="animate-spin h-4 w-4 mr-2" />
+                      Pausing...
+                    </>
+                  ) : (
+                    <>
+                      <Pause className="h-4 w-4 mr-2" />
+                      Pause Processing
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </div>
           <div className="px-4 py-5 sm:p-6">

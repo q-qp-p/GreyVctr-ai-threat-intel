@@ -552,7 +552,7 @@ def enrich_threat(self, threat_id: str) -> dict:
     Returns:
         Dictionary with enrichment results:
         {
-            'status': 'success' | 'partial' | 'error',
+            'status': 'success' | 'partial' | 'error' | 'skipped_paused',
             'threat_id': str,
             'threat_type': str or None,
             'severity': int or None,
@@ -570,6 +570,22 @@ def enrich_threat(self, threat_id: str) -> dict:
     from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
     from sqlalchemy.orm import sessionmaker
     from services.enrichment import EnrichmentService
+    from services.processing_state import ProcessingStateManager
+    
+    # Check pause state before doing any work (fail-open on Redis errors)
+    try:
+        async def _check_paused():
+            mgr = ProcessingStateManager()
+            try:
+                return await mgr.is_paused()
+            finally:
+                await mgr.close()
+        
+        if asyncio.run(_check_paused()):
+            logger.warning(f"Processing paused, skipping enrichment for threat: {threat_id}")
+            return {'status': 'skipped_paused', 'threat_id': threat_id}
+    except Exception as e:
+        logger.error(f"Failed to check pause state for threat {threat_id}, proceeding with enrichment: {e}")
     
     logger.info(f"Starting enrichment for threat: {threat_id}")
     
@@ -963,6 +979,7 @@ def analyze_with_llm(self, threat_id: str) -> dict:
         {
             'success': bool,
             'threat_id': str,
+            'status': 'skipped_paused' (if processing is paused),
             'analysis_id': str (if successful),
             'model_name': str (if successful),
             'error': str (if failed)
@@ -971,12 +988,28 @@ def analyze_with_llm(self, threat_id: str) -> dict:
     Raises:
         Retry: If analysis fails due to temporary errors and retries are available
         
-    Requirements: 10.1, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9, 10.10
+    Requirements: 5.1, 5.2, 5.3, 10.1, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9, 10.10
     """
     import asyncio
     from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
     from sqlalchemy.orm import sessionmaker
     from services.analysis import get_analysis_service
+    from services.processing_state import ProcessingStateManager
+    
+    # Check pause state before doing any work (fail-open on Redis errors)
+    try:
+        async def _check_paused():
+            mgr = ProcessingStateManager()
+            try:
+                return await mgr.is_paused()
+            finally:
+                await mgr.close()
+        
+        if asyncio.run(_check_paused()):
+            logger.warning(f"Processing paused, skipping LLM analysis for threat: {threat_id}")
+            return {'status': 'skipped_paused', 'threat_id': threat_id}
+    except Exception as e:
+        logger.error(f"Failed to check pause state for threat {threat_id}, proceeding with LLM analysis: {e}")
     
     logger.info(f"Starting LLM analysis for threat: {threat_id}")
     

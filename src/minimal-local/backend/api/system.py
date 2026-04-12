@@ -61,6 +61,28 @@ class CollectionSchedule(BaseModel):
         }
 
 
+class ProcessingStatus(BaseModel):
+    """Processing pause/resume state"""
+    paused: bool
+    paused_at: Optional[str] = None
+    paused_by: Optional[str] = None
+
+
+class PauseProcessingResponse(BaseModel):
+    """Response model for pause processing endpoint"""
+    status: Literal["success", "already_paused"]
+    message: str
+    paused_at: Optional[datetime] = None
+
+
+class ResumeProcessingResponse(BaseModel):
+    """Response model for resume processing endpoint"""
+    status: Literal["success", "already_active"]
+    message: str
+    requeued_enrichment: int = 0
+    requeued_llm: int = 0
+
+
 class SystemStatusResponse(BaseModel):
     """Complete system status"""
     timestamp: datetime
@@ -69,6 +91,7 @@ class SystemStatusResponse(BaseModel):
     database: Dict[str, Any]
     services: Dict[str, str]
     performance: Dict[str, Any]
+    processing: ProcessingStatus
 
 
 @router.get("/status", response_model=SystemStatusResponse)
@@ -104,13 +127,17 @@ async def get_system_status(
     # Get performance metrics
     performance_metrics = await _get_performance_metrics(db)
     
+    # Get processing pause state
+    processing_status = await _get_processing_status()
+    
     return SystemStatusResponse(
         timestamp=datetime.utcnow(),
         pipeline=pipeline_status,
         collection=collection_schedule,
         database=database_stats,
         services=service_health,
-        performance=performance_metrics
+        performance=performance_metrics,
+        processing=processing_status
     )
 
 
@@ -186,6 +213,211 @@ async def collect_now(
             status_code=500,
             detail=f"Collection service unavailable: {str(redis_error)}"
         )
+
+
+@router.post("/pause-processing", response_model=PauseProcessingResponse)
+async def pause_processing(
+    current_user: User = Depends(get_current_admin_user)
+):
+    """
+    Pause GPU-intensive processing (Admin only)
+
+    Pauses enrichment and LLM analysis tasks. Collection (RSS fetching)
+    continues unaffected. Tasks already in progress will complete, but
+    new tasks will check the pause state and skip processing.
+
+    Returns:
+        PauseProcessingResponse with status and paused_at timestamp
+
+    Raises:
+        HTTPException 500: If Redis is unavailable
+    """
+    from services.processing_state import get_processing_state_manager
+
+    logger.info(f"Pause processing requested by user {current_user.username}")
+
+    try:
+        state_manager = get_processing_state_manager()
+
+        # Check if already paused
+        if await state_manager.is_paused():
+            pause_info = await state_manager.get_pause_info()
+            logger.info("Processing is already paused")
+            return PauseProcessingResponse(
+                status="already_paused",
+                message="Processing is already paused",
+                paused_at=datetime.fromisoformat(pause_info["paused_at"]) if pause_info.get("paused_at") else None
+            )
+
+        # Set pause state
+        await state_manager.set_paused(True, username=current_user.username)
+        pause_info = await state_manager.get_pause_info()
+
+        paused_at = datetime.fromisoformat(pause_info["paused_at"]) if pause_info.get("paused_at") else datetime.utcnow()
+
+        logger.info(f"Processing paused successfully by {current_user.username} at {paused_at}")
+
+        return PauseProcessingResponse(
+            status="success",
+            message="Processing paused successfully",
+            paused_at=paused_at
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to pause processing: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Processing service unavailable: {str(e)}"
+        )
+
+
+@router.post("/resume-processing", response_model=ResumeProcessingResponse)
+async def resume_processing(
+    current_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Resume GPU-intensive processing (Admin only)
+
+    Clears the pause state and re-queues threats that are stuck in pending
+    enrichment or pending LLM analysis status so that skipped work is
+    picked up.
+
+    Returns:
+        ResumeProcessingResponse with status and counts of re-queued threats
+
+    Raises:
+        HTTPException 500: If Redis is unavailable
+    """
+    from services.processing_state import get_processing_state_manager
+    from tasks import enrich_threat, analyze_with_llm
+
+    logger.info(f"Resume processing requested by user {current_user.username}")
+
+    try:
+        state_manager = get_processing_state_manager()
+
+        # Check if already active
+        if not await state_manager.is_paused():
+            logger.info("Processing is already active")
+            return ResumeProcessingResponse(
+                status="already_active",
+                message="Processing is already active"
+            )
+
+        # Clear pause state
+        await state_manager.set_paused(False, username=current_user.username)
+
+        # Re-queue threats with pending enrichment
+        requeued_enrichment = 0
+        try:
+            result = await db.execute(
+                select(Threat.id).where(
+                    Threat.enrichment_status == 'pending'
+                )
+            )
+            pending_enrichment_ids = [str(row[0]) for row in result.all()]
+
+            for threat_id in pending_enrichment_ids:
+                try:
+                    enrich_threat.delay(threat_id)
+                    requeued_enrichment += 1
+                except Exception as e:
+                    logger.error(f"Failed to re-queue enrichment for threat {threat_id}: {e}")
+        except Exception as e:
+            logger.error(f"Failed to query pending enrichment threats: {e}")
+
+        # Re-queue threats with pending LLM analysis AND completed enrichment
+        requeued_llm = 0
+        try:
+            result = await db.execute(
+                select(Threat.id).where(
+                    Threat.llm_analysis_status == 'pending',
+                    Threat.enrichment_status == 'complete'
+                )
+            )
+            pending_llm_ids = [str(row[0]) for row in result.all()]
+
+            for threat_id in pending_llm_ids:
+                try:
+                    analyze_with_llm.delay(threat_id)
+                    requeued_llm += 1
+                except Exception as e:
+                    logger.error(f"Failed to re-queue LLM analysis for threat {threat_id}: {e}")
+        except Exception as e:
+            logger.error(f"Failed to query pending LLM analysis threats: {e}")
+
+        logger.info(
+            f"Processing resumed by {current_user.username}: "
+            f"re-queued {requeued_enrichment} enrichment, {requeued_llm} LLM tasks"
+        )
+
+        return ResumeProcessingResponse(
+            status="success",
+            message="Processing resumed successfully",
+            requeued_enrichment=requeued_enrichment,
+            requeued_llm=requeued_llm
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to resume processing: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Processing service unavailable: {str(e)}"
+        )
+
+
+def select_threats_for_enrichment_requeue(threats):
+    """Select threats that need enrichment re-queuing on resume.
+
+    Pure selection logic extracted for testability.
+
+    Args:
+        threats: Iterable of objects with ``enrichment_status`` attribute.
+
+    Returns:
+        List of threats with ``enrichment_status == 'pending'``.
+    """
+    return [t for t in threats if t.enrichment_status == "pending"]
+
+
+def select_threats_for_llm_requeue(threats):
+    """Select threats that need LLM analysis re-queuing on resume.
+
+    Pure selection logic extracted for testability.
+
+    Args:
+        threats: Iterable of objects with ``llm_analysis_status`` and
+            ``enrichment_status`` attributes.
+
+    Returns:
+        List of threats with ``llm_analysis_status == 'pending'`` AND
+        ``enrichment_status == 'complete'``.
+    """
+    return [
+        t
+        for t in threats
+        if t.llm_analysis_status == "pending" and t.enrichment_status == "complete"
+    ]
+
+
+async def _get_processing_status() -> ProcessingStatus:
+    """Get current processing pause/resume state from Redis.
+    
+    Defaults to not paused if Redis is unavailable.
+    """
+    try:
+        from services.processing_state import get_processing_state_manager
+        state_manager = get_processing_state_manager()
+        pause_info = await state_manager.get_pause_info()
+        return ProcessingStatus(
+            paused=pause_info["paused"],
+            paused_at=pause_info.get("paused_at"),
+            paused_by=pause_info.get("paused_by"),
+        )
+    except Exception as e:
+        logger.error(f"Error getting processing status: {e}")
+        return ProcessingStatus(paused=False)
 
 
 async def _get_pipeline_status() -> PipelineStatus:
