@@ -235,6 +235,7 @@ The API uses a hybrid authentication model:
   - `GET /api/v1/system/status` - System status and metrics (Public - Read-only)
   - `GET /api/v1/system/llm-analysis-stats` - LLM analysis statistics (Public - Read-only)
   - `POST /api/v1/system/retry-failed-llm` - Retry failed LLM analysis (**Admin only** - Write operation)
+  - `POST /api/v1/system/recover-pending-llm` - Re-queue orphaned pending LLM analyses (**Admin only** - Write operation)
   - `GET /api/v1/system/ollama-config` - Ollama configuration (Public - Read-only)
   - `GET /api/v1/system/threat-type-info` - Threat type information (Public - Read-only)
 
@@ -242,7 +243,7 @@ This design allows threat intelligence and system status to be shared publicly w
 
 **Security Notes**:
 - Read-only system endpoints are public for dashboard visibility
-- Write operations (retry-failed-llm) require **admin authentication**
+- Write operations (retry-failed-llm, recover-pending-llm) require **admin authentication**
 - Rate limiting should be implemented at the API gateway level (not in application)
 - Audit logging for admin actions logs to stdout/Docker logs (can be forwarded to log aggregation systems)
 - Input validation limits are not enforced at application level (should be handled by gateway/proxy)
@@ -2148,6 +2149,22 @@ This usually means:
 1. Ollama is down or overloaded
 2. Task queue is backed up
 3. Worker concurrency is too low
+4. Orphaned tasks from worker restarts or pipeline errors
+
+The system automatically recovers orphaned pending analyses on API startup. If threats are stuck mid-session (e.g., after laptop sleep/wake), you can trigger recovery manually:
+
+```bash
+# Check how many are pending
+curl http://localhost:8000/api/v1/system/llm-analysis-stats
+
+# Re-queue orphaned pending analyses (requires admin auth)
+curl -X POST http://localhost:8000/api/v1/system/recover-pending-llm \
+  -H "Authorization: Bearer <your-token>"
+
+# Or use the "Collect Now" button in the UI to trigger a fresh collection
+```
+
+Other checks:
 
 ```bash
 # Check Ollama status

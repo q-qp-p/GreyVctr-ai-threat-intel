@@ -85,6 +85,70 @@ async def check_and_trigger_catchup() -> None:
         # Don't raise - allow startup to continue
 
 
+async def recover_orphaned_analyses() -> int:
+    """
+    Find threats stuck in 'pending' LLM analysis status with no queued task
+    and re-queue them for analysis.
+    
+    Threats can become orphaned when:
+    - Worker restarts drop in-flight enrichment tasks
+    - Event loop errors prevent task chaining
+    - Enrichment succeeds but analyze_with_llm.delay() fails
+    
+    Only re-queues threats that have been pending for more than 10 minutes
+    (to avoid re-queuing threats that are actively being processed).
+    
+    Returns:
+        Number of threats re-queued
+    """
+    from datetime import datetime, timedelta
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy import select
+    from models.threat import Threat
+    from tasks import analyze_with_llm
+    
+    logger.info("Checking for orphaned pending LLM analyses")
+    
+    try:
+        engine = create_async_engine(settings.database_url, echo=False)
+        async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        
+        async with async_session() as session:
+            # Find threats pending for more than 10 minutes (not freshly queued)
+            cutoff = datetime.utcnow() - timedelta(minutes=10)
+            result = await session.execute(
+                select(Threat.id).where(
+                    Threat.llm_analysis_status == 'pending',
+                    Threat.ingested_at < cutoff
+                )
+            )
+            pending_ids = [str(row[0]) for row in result.all()]
+        
+        await engine.dispose()
+        
+        if not pending_ids:
+            logger.info("No orphaned pending analyses found")
+            return 0
+        
+        logger.warning(f"Found {len(pending_ids)} orphaned pending analyses, re-queuing")
+        
+        queued = 0
+        for threat_id in pending_ids:
+            try:
+                analyze_with_llm.delay(threat_id)
+                queued += 1
+            except Exception as e:
+                logger.error(f"Failed to queue orphaned threat {threat_id}: {e}")
+        
+        logger.info(f"Re-queued {queued} orphaned analyses")
+        return queued
+    
+    except Exception as e:
+        logger.warning(f"Failed to recover orphaned analyses: {e}")
+        return 0
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:
     """
@@ -106,6 +170,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     
     # Check for overdue collections and trigger catch-up if needed
     await check_and_trigger_catchup()
+    
+    # Recover any orphaned pending LLM analyses
+    await recover_orphaned_analyses()
     
     yield
     

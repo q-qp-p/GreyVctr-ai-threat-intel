@@ -705,6 +705,41 @@ async def retry_failed_llm_analysis(
         }
 
 
+@router.post("/recover-pending-llm")
+async def recover_pending_llm_analysis(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """
+    Re-queue orphaned pending LLM analyses (Admin only)
+    
+    Finds threats stuck in 'pending' LLM analysis status for more than
+    10 minutes and re-queues them. This recovers from worker restarts,
+    event loop errors, or other pipeline failures.
+    
+    Returns:
+        Number of threats re-queued
+    """
+    try:
+        from main import recover_orphaned_analyses
+        
+        queued = await recover_orphaned_analyses()
+        
+        return {
+            "status": "success",
+            "message": f"Re-queued {queued} orphaned pending analyses",
+            "queued": queued
+        }
+    
+    except Exception as e:
+        logger.error(f"Error recovering pending analyses: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "message": str(e),
+            "queued": 0
+        }
+
+
 @router.get("/ollama-config")
 async def get_ollama_config():
     """
