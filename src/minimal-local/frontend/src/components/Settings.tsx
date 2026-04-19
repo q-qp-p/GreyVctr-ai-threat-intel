@@ -102,7 +102,7 @@ export default function Settings() {
               AI Shield Intelligence - Minimal Local Profile
             </p>
             <p className="mt-1">
-              Version: 0.1.0
+              Version: {__APP_VERSION__}
             </p>
           </div>
         </div>

@@ -187,4 +187,116 @@ export const systemApi = {
   },
 }
 
+// Analytics types
+export interface AnalyticsFilterParams {
+  date_from?: string
+  date_to?: string
+  threat_type?: string
+  severity_min?: number
+  severity_max?: number
+  source?: string
+  include_unknown?: boolean
+}
+
+export interface TrendsParams extends AnalyticsFilterParams {
+  granularity?: 'day' | 'week' | 'month'
+  group_by?: 'threat_type' | 'severity' | 'source'
+}
+
+export interface DistributionsParams extends AnalyticsFilterParams {
+  dimension: 'threat_type' | 'severity' | 'source'
+}
+
+export interface EntityClustersParams extends AnalyticsFilterParams {
+  entity_type?: 'cve' | 'framework' | 'technique' | 'system'
+  min_shared?: number
+  include_unknown?: boolean
+}
+
+export interface AnalyticsMeta {
+  total_records: number
+  filters_applied: Record<string, unknown>
+  computed_at: string
+}
+
+export interface TrendItem {
+  period: string
+  count: number
+  group?: string | null
+}
+
+export interface DistributionItem {
+  label: string
+  count: number
+}
+
+export interface MitreHeatmapItem {
+  tactic: string
+  technique: string
+  technique_id: string
+  count: number
+}
+
+export interface EntityClusterItem {
+  entity_value: string
+  entity_type: string
+  threat_count: number
+  threat_ids: string[]
+}
+
+export interface SeverityMatrixItem {
+  severity: number
+  threat_type: string
+  count: number
+}
+
+export interface AnalyticsResponse<T> {
+  data: T[]
+  meta: AnalyticsMeta
+}
+
+export interface GraphNode {
+  id: string
+  label: string
+  type: string
+}
+
+export interface GraphEdge {
+  source: string
+  target: string
+}
+
+export interface GraphData {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+}
+
+// Analytics API
+export const analyticsApi = {
+  trends: async (params?: TrendsParams): Promise<AnalyticsResponse<TrendItem>> => {
+    const response = await api.get('/api/v1/analytics/trends', { params })
+    return response.data
+  },
+  distributions: async (params: DistributionsParams): Promise<AnalyticsResponse<DistributionItem>> => {
+    const response = await api.get('/api/v1/analytics/distributions', { params })
+    return response.data
+  },
+  mitreHeatmap: async (params?: AnalyticsFilterParams): Promise<AnalyticsResponse<MitreHeatmapItem>> => {
+    const response = await api.get('/api/v1/analytics/mitre-heatmap', { params })
+    return response.data
+  },
+  entityClusters: async (params?: EntityClustersParams): Promise<AnalyticsResponse<EntityClusterItem>> => {
+    const response = await api.get('/api/v1/analytics/entity-clusters', { params })
+    return response.data
+  },
+  severityMatrix: async (params?: AnalyticsFilterParams): Promise<AnalyticsResponse<SeverityMatrixItem>> => {
+    const response = await api.get('/api/v1/analytics/severity-matrix', { params })
+    return response.data
+  },
+  entityClusterGraph: async (params?: EntityClustersParams): Promise<AnalyticsResponse<GraphData>> => {
+    const response = await api.get('/api/v1/analytics/entity-clusters/graph', { params })
+    return response.data
+  },
+}
+
 export default api

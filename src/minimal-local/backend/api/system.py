@@ -290,7 +290,7 @@ async def resume_processing(
         HTTPException 500: If Redis is unavailable
     """
     from services.processing_state import get_processing_state_manager
-    from tasks import enrich_threat, analyze_with_llm
+    from tasks import requeue_pending_threats
 
     logger.info(f"Resume processing requested by user {current_user.username}")
 
@@ -308,55 +308,19 @@ async def resume_processing(
         # Clear pause state
         await state_manager.set_paused(False, username=current_user.username)
 
-        # Re-queue threats with pending enrichment
-        requeued_enrichment = 0
-        try:
-            result = await db.execute(
-                select(Threat.id).where(
-                    Threat.enrichment_status == 'pending'
-                )
-            )
-            pending_enrichment_ids = [str(row[0]) for row in result.all()]
-
-            for threat_id in pending_enrichment_ids:
-                try:
-                    enrich_threat.delay(threat_id)
-                    requeued_enrichment += 1
-                except Exception as e:
-                    logger.error(f"Failed to re-queue enrichment for threat {threat_id}: {e}")
-        except Exception as e:
-            logger.error(f"Failed to query pending enrichment threats: {e}")
-
-        # Re-queue threats with pending LLM analysis AND completed enrichment
-        requeued_llm = 0
-        try:
-            result = await db.execute(
-                select(Threat.id).where(
-                    Threat.llm_analysis_status == 'pending',
-                    Threat.enrichment_status == 'complete'
-                )
-            )
-            pending_llm_ids = [str(row[0]) for row in result.all()]
-
-            for threat_id in pending_llm_ids:
-                try:
-                    analyze_with_llm.delay(threat_id)
-                    requeued_llm += 1
-                except Exception as e:
-                    logger.error(f"Failed to re-queue LLM analysis for threat {threat_id}: {e}")
-        except Exception as e:
-            logger.error(f"Failed to query pending LLM analysis threats: {e}")
+        # Fire background task to re-queue pending threats
+        requeue_pending_threats.delay()
 
         logger.info(
-            f"Processing resumed by {current_user.username}: "
-            f"re-queued {requeued_enrichment} enrichment, {requeued_llm} LLM tasks"
+            f"Processing resumed by {current_user.username}, "
+            f"re-queue task dispatched in background"
         )
 
         return ResumeProcessingResponse(
             status="success",
-            message="Processing resumed successfully",
-            requeued_enrichment=requeued_enrichment,
-            requeued_llm=requeued_llm
+            message="Processing resumed successfully. Pending threats are being re-queued in the background.",
+            requeued_enrichment=0,
+            requeued_llm=0
         )
 
     except Exception as e:

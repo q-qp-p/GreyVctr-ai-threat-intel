@@ -6,6 +6,7 @@ A minimal local deployment system for AI Shield Intelligence, designed for early
 
 - **[Configuration Guide](CONFIGURATION_GUIDE.md)** - Detailed guide for environment variables, Ollama models, and collection scheduling
 - **[Performance Tuning Guide](PERFORMANCE_TUNING.md)** - Optimize performance for your environment (GPU vs CPU, host vs container)
+- **[Analytics & Clustering](ANALYTICS.md)** - Threat analytics visualizations, clustering insights, and analytics API endpoint reference
 
 ## Overview
 

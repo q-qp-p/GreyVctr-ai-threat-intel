@@ -574,14 +574,11 @@ def enrich_threat(self, threat_id: str) -> dict:
     
     # Check pause state before doing any work (fail-open on Redis errors)
     try:
-        async def _check_paused():
-            mgr = ProcessingStateManager()
-            try:
-                return await mgr.is_paused()
-            finally:
-                await mgr.close()
-        
-        if asyncio.run(_check_paused()):
+        import redis as sync_redis
+        r = sync_redis.from_url(settings.redis_url, decode_responses=True)
+        paused_value = r.get("processing:paused")
+        r.close()
+        if paused_value and paused_value.lower() == "true":
             logger.warning(f"Processing paused, skipping enrichment for threat: {threat_id}")
             return {'status': 'skipped_paused', 'threat_id': threat_id}
     except Exception as e:
@@ -998,14 +995,11 @@ def analyze_with_llm(self, threat_id: str) -> dict:
     
     # Check pause state before doing any work (fail-open on Redis errors)
     try:
-        async def _check_paused():
-            mgr = ProcessingStateManager()
-            try:
-                return await mgr.is_paused()
-            finally:
-                await mgr.close()
-        
-        if asyncio.run(_check_paused()):
+        import redis as sync_redis
+        r = sync_redis.from_url(settings.redis_url, decode_responses=True)
+        paused_value = r.get("processing:paused")
+        r.close()
+        if paused_value and paused_value.lower() == "true":
             logger.warning(f"Processing paused, skipping LLM analysis for threat: {threat_id}")
             return {'status': 'skipped_paused', 'threat_id': threat_id}
     except Exception as e:
@@ -1197,6 +1191,73 @@ def send_alert(self, threat_id: str, channels: list = None) -> dict:
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
+
+
+@celery_app.task(
+    name='tasks.requeue_pending_threats',
+    bind=True,
+)
+def requeue_pending_threats(self) -> dict:
+    """
+    Re-queue threats with pending enrichment or LLM analysis status.
+
+    Called as a background task after resume-processing so the API
+    endpoint can return immediately.
+    """
+    import asyncio
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy import select
+    from models import Threat
+
+    logger.info("Starting background re-queue of pending threats")
+
+    engine = create_async_engine(settings.database_url, echo=False)
+    async_session_maker = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def _requeue():
+        requeued_enrichment = 0
+        requeued_llm = 0
+
+        async with async_session_maker() as session:
+            # Re-queue pending enrichment
+            result = await session.execute(
+                select(Threat.id).where(Threat.enrichment_status == 'pending')
+            )
+            for row in result.all():
+                try:
+                    enrich_threat.delay(str(row[0]))
+                    requeued_enrichment += 1
+                except Exception as e:
+                    logger.error(f"Failed to re-queue enrichment for {row[0]}: {e}")
+
+            # Re-queue pending LLM analysis (only if enrichment is complete)
+            result = await session.execute(
+                select(Threat.id).where(
+                    Threat.llm_analysis_status == 'pending',
+                    Threat.enrichment_status == 'complete'
+                )
+            )
+            for row in result.all():
+                try:
+                    analyze_with_llm.delay(str(row[0]))
+                    requeued_llm += 1
+                except Exception as e:
+                    logger.error(f"Failed to re-queue LLM for {row[0]}: {e}")
+
+        await engine.dispose()
+        return requeued_enrichment, requeued_llm
+
+    requeued_enrichment, requeued_llm = asyncio.run(_requeue())
+
+    logger.info(f"Background re-queue complete: {requeued_enrichment} enrichment, {requeued_llm} LLM tasks")
+
+    return {
+        'status': 'success',
+        'requeued_enrichment': requeued_enrichment,
+        'requeued_llm': requeued_llm,
+    }
+
 
 def get_task_status(task_id: str) -> dict:
     """

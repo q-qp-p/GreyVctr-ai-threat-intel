@@ -8,6 +8,7 @@ import ThreatDetail from './components/ThreatDetail'
 import SearchPage from './components/SearchPage'
 import SourcesManager from './components/SourcesManager'
 import Settings from './components/Settings'
+import AnalyticsPage from './components/AnalyticsPage'
 import Login from './components/Login'
 
 function App() {
@@ -72,6 +73,18 @@ function App() {
             isAuthenticated ? (
               <Layout>
                 <SourcesManager />
+              </Layout>
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
+        <Route
+          path="/analytics"
+          element={
+            isAuthenticated ? (
+              <Layout>
+                <AnalyticsPage />
               </Layout>
             ) : (
               <Navigate to="/login" replace />

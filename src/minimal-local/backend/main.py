@@ -273,7 +273,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 # Import and include routers
-from api import health, sources, search, threats, auth, system
+from api import health, sources, search, threats, auth, system, analytics
 
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
 app.include_router(system.router)
@@ -281,6 +281,7 @@ app.include_router(auth.router)
 app.include_router(threats.router)
 app.include_router(sources.router)
 app.include_router(search.router, tags=["search"])
+app.include_router(analytics.router)
 
 
 if __name__ == "__main__":

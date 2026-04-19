@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
-import { Home, Search, Database, Settings, LogOut } from 'lucide-react'
+import { Home, Search, BarChart3, Database, Settings, LogOut } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import { authApi } from '../services/api'
 
@@ -24,6 +24,7 @@ export default function Layout({ children }: LayoutProps) {
   const navItems = [
     { path: '/', icon: Home, label: 'Dashboard' },
     { path: '/search', icon: Search, label: 'Search' },
+    { path: '/analytics', icon: BarChart3, label: 'Analytics' },
     { path: '/sources', icon: Database, label: 'Sources' },
     { path: '/settings', icon: Settings, label: 'Settings' },
   ]
@@ -89,7 +90,7 @@ export default function Layout({ children }: LayoutProps) {
 
         {/* Main content */}
         <main className="flex-1 p-8 bg-gray-50 dark:bg-gray-900">
-          <div className="max-w-7xl mx-auto">
+          <div className="mx-auto">
             {children}
           </div>
         </main>

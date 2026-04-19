@@ -39,6 +39,7 @@ A minimal local deployment system designed for early pilots and smaller teams. O
 - MITRE ATLAS mapping and severity scoring
 - Local LLM analysis (Ollama with Qwen2.5:7b)
 - Full-text search with fuzzy matching
+- Analytics dashboard with trends, distributions, MITRE heatmap, entity clusters, and force-directed graph
 - Alert notifications (email, webhook)
 
 **Default Sources** (17 configured, fully customizable):
@@ -200,6 +201,8 @@ For local development setup, testing, and contribution guidelines, see:
 - [x] Alert notifications (email, webhook)
 - [x] REST API with authentication
 - [x] React frontend (basic)
+- [x] Analytics dashboard (trends, distributions, MITRE heatmap, entity clusters, severity matrix)
+- [x] Entity relationship graph visualization (force-directed network of threats and shared entities)
 
 ### In Progress
 - [ ] AWS deployment profile
