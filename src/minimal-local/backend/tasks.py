@@ -70,6 +70,11 @@ celery_app.conf.update(
             'schedule': crontab(minute=0, hour='*/12'),  # Every 12 hours at minute 0
             'options': {'expires': 43000}  # Task expires after 11.9 hours
         },
+        'recover-orphaned-tasks-every-5-min': {
+            'task': 'tasks.recover_orphaned_tasks',
+            'schedule': crontab(minute='*/5'),  # Every 5 minutes
+            'options': {'expires': 240}  # Expires after 4 minutes
+        },
     },
 )
 
@@ -1251,6 +1256,107 @@ def requeue_pending_threats(self) -> dict:
     requeued_enrichment, requeued_llm = asyncio.run(_requeue())
 
     logger.info(f"Background re-queue complete: {requeued_enrichment} enrichment, {requeued_llm} LLM tasks")
+
+    return {
+        'status': 'success',
+        'requeued_enrichment': requeued_enrichment,
+        'requeued_llm': requeued_llm,
+    }
+
+
+@celery_app.task(
+    name='tasks.recover_orphaned_tasks',
+    bind=True,
+)
+def recover_orphaned_tasks(self) -> dict:
+    """
+    Periodic task that detects and re-queues orphaned pending threats.
+
+    Runs every 5 minutes via Celery Beat. Only re-queues if the Celery
+    queue is empty and processing is not paused — this avoids flooding
+    the queue when work is already in progress.
+    """
+    import asyncio
+    import redis as sync_redis
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy import select, func
+    from models import Threat
+
+    # Skip if processing is paused
+    try:
+        r = sync_redis.from_url(settings.redis_url, decode_responses=True)
+        paused = r.get("processing:paused")
+        queue_len = r.llen("celery")
+        r.close()
+        if paused and paused.lower() == "true":
+            return {'status': 'skipped', 'reason': 'processing_paused'}
+        if queue_len > 0:
+            return {'status': 'skipped', 'reason': 'queue_not_empty', 'queue_depth': queue_len}
+    except Exception as e:
+        logger.error(f"Failed to check preconditions for orphan recovery: {e}")
+        return {'status': 'error', 'reason': str(e)}
+
+    engine = create_async_engine(settings.database_url, echo=False)
+    async_session_maker = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def _recover():
+        requeued_enrichment = 0
+        requeued_llm = 0
+
+        async with async_session_maker() as session:
+            # Count pending enrichment
+            result = await session.execute(
+                select(func.count()).select_from(Threat).where(
+                    Threat.enrichment_status == 'pending'
+                )
+            )
+            pending_enrichment_count = result.scalar() or 0
+
+            if pending_enrichment_count > 0:
+                result = await session.execute(
+                    select(Threat.id).where(Threat.enrichment_status == 'pending')
+                )
+                for row in result.all():
+                    try:
+                        enrich_threat.delay(str(row[0]))
+                        requeued_enrichment += 1
+                    except Exception as e:
+                        logger.error(f"Failed to re-queue enrichment for {row[0]}: {e}")
+
+            # Count pending LLM with completed enrichment
+            result = await session.execute(
+                select(func.count()).select_from(Threat).where(
+                    Threat.llm_analysis_status == 'pending',
+                    Threat.enrichment_status == 'complete'
+                )
+            )
+            pending_llm_count = result.scalar() or 0
+
+            if pending_llm_count > 0:
+                result = await session.execute(
+                    select(Threat.id).where(
+                        Threat.llm_analysis_status == 'pending',
+                        Threat.enrichment_status == 'complete'
+                    )
+                )
+                for row in result.all():
+                    try:
+                        analyze_with_llm.delay(str(row[0]))
+                        requeued_llm += 1
+                    except Exception as e:
+                        logger.error(f"Failed to re-queue LLM for {row[0]}: {e}")
+
+        await engine.dispose()
+        return requeued_enrichment, requeued_llm
+
+    requeued_enrichment, requeued_llm = asyncio.run(_recover())
+
+    if requeued_enrichment > 0 or requeued_llm > 0:
+        logger.info(
+            f"Orphan recovery: re-queued {requeued_enrichment} enrichment, "
+            f"{requeued_llm} LLM tasks"
+        )
 
     return {
         'status': 'success',
