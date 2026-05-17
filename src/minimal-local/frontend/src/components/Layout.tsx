@@ -89,8 +89,8 @@ export default function Layout({ children }: LayoutProps) {
         </aside>
 
         {/* Main content */}
-        <main className="flex-1 p-8 bg-gray-50 dark:bg-gray-900">
-          <div className="mx-auto">
+        <main className="flex-1 p-8 bg-gray-50 dark:bg-gray-900 overflow-hidden">
+          <div className="w-full min-w-0">
             {children}
           </div>
         </main>

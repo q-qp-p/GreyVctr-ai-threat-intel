@@ -155,16 +155,6 @@ export default function AnalyticsPage() {
           />
         </ChartSection>
 
-        <ChartSection
-          title="MITRE ATT&CK Heatmap"
-          isLoading={mitreHeatmapQuery.isLoading}
-          isError={mitreHeatmapQuery.isError}
-          refetch={() => mitreHeatmapQuery.refetch()}
-          isEmpty={!mitreHeatmapQuery.data?.data?.length}
-        >
-          <MitreHeatmap data={mitreHeatmapQuery.data?.data ?? []} />
-        </ChartSection>
-
         <div className={`bg-white dark:bg-gray-800 shadow rounded-md p-6 ${entityClusterView === 'graph' ? 'lg:col-span-2' : ''}`}>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Entity Clusters</h2>
 
@@ -267,15 +257,29 @@ export default function AnalyticsPage() {
           )}
         </div>
 
-        <ChartSection
-          title="Severity × Type Matrix"
-          isLoading={severityMatrixQuery.isLoading}
-          isError={severityMatrixQuery.isError}
-          refetch={() => severityMatrixQuery.refetch()}
-          isEmpty={!severityMatrixQuery.data?.data?.length}
-        >
-          <SeverityMatrix data={severityMatrixQuery.data?.data ?? []} />
-        </ChartSection>
+        <div className="lg:col-span-2">
+          <ChartSection
+            title="MITRE ATT&CK Heatmap"
+            isLoading={mitreHeatmapQuery.isLoading}
+            isError={mitreHeatmapQuery.isError}
+            refetch={() => mitreHeatmapQuery.refetch()}
+            isEmpty={!mitreHeatmapQuery.data?.data?.length}
+          >
+            <MitreHeatmap data={mitreHeatmapQuery.data?.data ?? []} />
+          </ChartSection>
+        </div>
+
+        <div className="lg:col-span-2">
+          <ChartSection
+            title="Severity × Type Matrix"
+            isLoading={severityMatrixQuery.isLoading}
+            isError={severityMatrixQuery.isError}
+            refetch={() => severityMatrixQuery.refetch()}
+            isEmpty={!severityMatrixQuery.data?.data?.length}
+          >
+            <SeverityMatrix data={severityMatrixQuery.data?.data ?? []} />
+          </ChartSection>
+        </div>
       </div>
     </div>
   )
